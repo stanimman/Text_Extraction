@@ -1,2 +1,4 @@
 lightning_logs/*
 .ipynb_checkpoints/*
+outputs/*
+wand/*

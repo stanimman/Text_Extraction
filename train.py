@@ -13,6 +13,11 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import pytorch_lightning as pl
 import logging
 from pytorch_lightning.metrics.functional import f1 as f1_score
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+import wandb
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
 logger = logging.getLogger(__name__)
 
 gtind2word ={}
@@ -63,18 +68,18 @@ class NERDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):                
         
-        valid_data_loader = DataLoader(dataset=self.valid_seqdataset, batch_size=self.batch_size, shuffle=True, collate_fn=self.pad_collate)
+        valid_data_loader = DataLoader(dataset=self.valid_seqdataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.pad_collate)
         return valid_data_loader
 
 
 class DataPrep():
     def __init__(self,data_path="C:\\Users\\Ant PC\\Music\\dataset\\FIN5.txt",
     glove_path="C:\\Users\\Ant PC\\Music\\NER-LSTM-CNN-Pytorch-master\\NER-LSTM-CNN-Pytorch-master\\data\\glove.6B.100d.txt",
-    batch_size = 32 ):       
+    embed_dim=100):       
         
         self.data_path = data_path
-        self.glove_path = glove_path
-        self.batch_size = batch_size                
+        self.glove_path = glove_path       
+        self.embed_dim = embed_dim             
     
     def download_data(self):
         word_list = []
@@ -125,7 +130,7 @@ class DataPrep():
 
     def get_emb_vect(self,text,glove_emb_dict,glove_emb_list,word2ind,ind2word):
         words_NOT_found = 0
-        embedding_dim = 100
+        embedding_dim = self.embed_dim
         for sent in text:
             for word in sent.split():        
                 word = word.lower()
@@ -172,7 +177,7 @@ class DataPrep():
         return input_seq,target_seq,glove_emb_vec,ind2word,tind2word
     
 class Model(pl.LightningModule):
-    def __init__(self, input_size, output_size, hidden_dim, n_layers,batch_size):
+    def __init__(self, input_size, output_size, hidden_dim, n_layers,batch_size,lr):
         super(Model, self).__init__()
 
         # Defining some parameters
@@ -181,6 +186,7 @@ class Model(pl.LightningModule):
         self.n_layers = n_layers
         self.batch_size = batch_size
         self.num_class = output_size
+        self.lr = lr
 
         #Defining the layers
         # RNN Layer
@@ -215,13 +221,13 @@ class Model(pl.LightningModule):
 
     def training_step(self,batch: dict, batch_idx: int):
         loss,f1 = self.calc_loss(batch, batch_idx)
-        self.log("train_loss",loss,prog_bar=True)
+        self.log("train_loss",loss,on_step=True)
         self.log("train_f1",f1,on_step=True)
         return loss
     
     def validation_step(self,batch: dict, batch_idx: int):
         loss,f1 = self.calc_loss(batch, batch_idx)
-        self.log("val_loss",loss,prog_bar=True)
+        self.log("val_loss",loss,on_epoch=True,prog_bar=True)
         self.log("val_f1",f1,on_epoch=True,prog_bar=True)
         return loss
     
@@ -241,21 +247,27 @@ class Model(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
 
-def train():
+@hydra.main(config_path='configs', config_name='default')
+def train(cfg: DictConfig):
+    # The decorator is enough to let Hydra load the configuration file.     
 
-    data_prep = DataPrep()
-    input_seq,target_seq,glove_emb_vec,ind2word,tind2word = data_prep.prepare_data()
-    print(tind2word)
+    data_prep = DataPrep(cfg.data.data_path,cfg.data.glove_path,cfg.model.embedding_dim)
+    input_seq,target_seq,glove_emb_vec,ind2word,tind2word = data_prep.prepare_data()    
     output_tag = len(tind2word)
-    vocab_size = len(ind2word)    
-    embedding_dim = 100
+    vocab_size = len(ind2word)        
+    pl.seed_everything(0)
+    wandb_logger = pl.loggers.WandbLogger()
     # Instantiate the model with hyperparameters
-    model = Model(input_size=embedding_dim, output_size=output_tag, hidden_dim=12, n_layers=1,batch_size=32)
-    trainer = pl.Trainer(max_epochs=10,gpus=1)
-    trainer.fit(model,datamodule=NERDataModule(input_seq,target_seq,glove_emb_vec,batch_size=32))       
+    
+
+    model = Model(input_size=cfg.model.embedding_dim, output_size=output_tag, hidden_dim=cfg.model.hidden_dim, n_layers=cfg.model.n_layers,batch_size=cfg.model.batch_size,lr=cfg.model.lr)
+    trainer = pl.Trainer(**cfg.trainer,logger=wandb_logger)
+    # Simple logging of the configuration    
+    trainer.fit(model,datamodule=NERDataModule(input_seq,target_seq,glove_emb_vec,batch_size=cfg.model.batch_size))       
+    logger.info(OmegaConf.to_yaml(cfg)) 
 
     
 

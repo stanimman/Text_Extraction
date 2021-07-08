@@ -1,0 +1,17 @@
+data:
+  data_path: "C:\\Users\\Ant PC\\Music\\dataset\\FIN5.txt"
+  glove_path: "C:\\Users\\Ant PC\\Music\\NER-LSTM-CNN-Pytorch-master\\NER-LSTM-CNN-Pytorch-master\\data\\glove.6B.100d.txt"
+  
+model:
+  hidden_dim: 12
+  n_layers: 1  
+  batch_size: 32
+  embedding_dim: 100
+  lr: .01
+
+trainer:
+  max_epochs: 25
+  gpus: 1
+  fast_dev_run: False
+
+
